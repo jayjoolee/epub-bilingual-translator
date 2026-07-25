@@ -1,0 +1,4 @@
+interface:
+  display_name: "Translate EPUB"
+  short_description: "Translate long EPUBs without losing formatting"
+  default_prompt: "Use $translate-epub to create a Korean-first bilingual copy of this DRM-free EPUB."
