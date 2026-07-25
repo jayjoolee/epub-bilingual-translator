@@ -2,17 +2,57 @@
 
 from __future__ import annotations
 
-from typing import Final
+from typing import TYPE_CHECKING, BinaryIO, Final
 from xml.etree import ElementTree as ET
 from xml.sax.saxutils import escape
 
+from defusedxml import ElementTree as DefusedET
+
 from epub_bilingual_translator.models import ArchiveError
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 _SERIALIZATION_CHUNK_CHARACTERS: Final = 64 * 1024
 
 
 class _XhtmlLimitExceededError(Exception):
     pass
+
+
+def parse_xhtml_bounded(
+    source: BinaryIO,
+    *,
+    max_nesting: int,
+    max_elements: int,
+) -> ET.Element:
+    """Parse one XHTML document while enforcing structural limits."""
+    root: ET.Element | None = None
+    depth = 0
+    elements = 0
+    for event, element in _iterparse_xhtml(source):
+        if event == "start":
+            if root is None:
+                root = element
+            depth += 1
+            elements += 1
+            if depth > max_nesting:
+                raise ArchiveError(detail="XHTML nesting exceeds limit")
+            if elements > max_elements:
+                raise ArchiveError(detail="XHTML element count exceeds limit")
+        else:
+            depth -= 1
+    if root is None:
+        raise ArchiveError(detail="malformed XML content")
+    return root
+
+
+def _iterparse_xhtml(source: BinaryIO) -> Iterator[tuple[str, ET.Element]]:
+    events: Iterator[tuple[str, ET.Element]] = DefusedET.iterparse(
+        source,
+        events=("start", "end"),
+    )
+    return events
 
 
 def utf8_byte_length_bounded(value: str, limit: int) -> int:

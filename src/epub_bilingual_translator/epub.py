@@ -7,7 +7,7 @@ import zipfile
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, BinaryIO, Final
+from typing import BinaryIO, Final
 from urllib.parse import unquote, urlsplit
 from xml.etree import ElementTree as ET
 
@@ -45,9 +45,7 @@ from epub_bilingual_translator.xhtml import (
     serialize_document_bounded,
     utf8_byte_length_bounded,
 )
-
-if TYPE_CHECKING:
-    from collections.abc import Iterator
+from epub_bilingual_translator.xhtml import parse_xhtml_bounded as _parse_xhtml_bounded
 
 _BLOCK_TAGS: Final = frozenset(
     {"p", "li", "blockquote", "figcaption", "dd", "dt", "td", "th"}
@@ -240,32 +238,11 @@ def _is_font_reference(uri: str | None, members: list[str]) -> bool:
 
 def parse_xhtml_bounded(source: BinaryIO) -> ET.Element:
     """Parse one XHTML document while enforcing structural limits."""
-    root: ET.Element | None = None
-    depth = 0
-    elements = 0
-    for event, element in _iterparse_xhtml(source):
-        if event == "start":
-            if root is None:
-                root = element
-            depth += 1
-            elements += 1
-            if depth > MAX_XHTML_NESTING:
-                raise ArchiveError(detail="XHTML nesting exceeds limit")
-            if elements > MAX_XHTML_ELEMENTS:
-                raise ArchiveError(detail="XHTML element count exceeds limit")
-        else:
-            depth -= 1
-    if root is None:
-        raise ArchiveError(detail="malformed XML content")
-    return root
-
-
-def _iterparse_xhtml(source: BinaryIO) -> Iterator[tuple[str, ET.Element]]:
-    events: Iterator[tuple[str, ET.Element]] = DefusedET.iterparse(
+    return _parse_xhtml_bounded(
         source,
-        events=("start", "end"),
+        max_nesting=MAX_XHTML_NESTING,
+        max_elements=MAX_XHTML_ELEMENTS,
     )
-    return events
 
 
 def _validate_paths(options: Options) -> None:
