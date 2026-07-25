@@ -26,8 +26,7 @@ uvx --from git+https://github.com/jayjoolee/epub-bilingual-translator \
 unzip -t "/absolute/path/book.ko.bilingual.epub"
 ```
 
-5. Report the output path, translated block count, fragment count, and skipped unsupported
-   content.
+5. Report the output path, translated block count, fragment count, and EPUB integrity result.
 
 ## Output rules
 
