@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Self
 
 import pytest
+from rich.text import Text
 from typer.testing import CliRunner
 
 from epub_bilingual_translator import cli, models
@@ -45,10 +46,11 @@ def test_help_exposes_public_one_line_options() -> None:
 
     # Then
     assert result.exit_code == 0
-    assert "--to" in result.stdout
-    assert "--source" in result.stdout
-    assert "--output" in result.stdout
-    assert "--max-chars" in result.stdout
+    help_text = Text.from_ansi(result.stdout).plain
+    assert "--to" in help_text
+    assert "--source" in help_text
+    assert "--output" in help_text
+    assert "--max-chars" in help_text
 
 
 def test_version_works_without_input_path() -> None:
