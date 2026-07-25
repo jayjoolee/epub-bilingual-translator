@@ -13,7 +13,7 @@ import pytest
 from epub_bilingual_translator import google, models
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator, Mapping
+    from collections.abc import Callable, Generator
 
 PAIR = models.LanguagePair(source="en", target="ko")
 SENTINEL = "PRIVATE_FRAGMENT_SENTINEL"
@@ -28,16 +28,16 @@ class FakeHttpClient:
         self.outcomes: list[HttpOutcome] = outcomes
         self.calls: int = 0
         self.closed: bool = False
+        self.urls: list[httpx2.URL] = []
 
     @contextmanager
     def stream(
         self,
         method: str,
-        url: str,
-        *,
-        params: Mapping[str, str],
+        url: httpx2.URL,
     ) -> Generator[httpx2.Response]:
-        del method, url, params
+        del method
+        self.urls.append(url)
         response = self._next_response()
         try:
             yield response

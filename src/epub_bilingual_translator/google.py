@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import socket
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, Protocol, Self, final
 
@@ -29,7 +29,7 @@ type JsonValue = JsonScalar | list[JsonValue] | dict[str, JsonValue]
 
 _ENDPOINT: Final = "https://translate.googleapis.com/translate_a/single"
 _TRANSIENT_STATUSES: Final = frozenset({429, 500, 502, 503, 504})
-MAX_PROVIDER_FRAGMENT_BYTES: Final = 32 * 1024
+MAX_PROVIDER_REQUEST_BYTES: Final = 32 * 1024
 MAX_PROVIDER_RESPONSE_BYTES: Final = 1024 * 1024
 _LIMITS: Final = httpx2.Limits(
     max_connections=200,
@@ -66,9 +66,7 @@ class HttpClient(Protocol):
     def stream(
         self,
         method: str,
-        url: str,
-        *,
-        params: Mapping[str, str],
+        url: httpx2.URL,
     ) -> AbstractContextManager[httpx2.Response]:
         """Open one streaming translation endpoint response."""
         ...
@@ -97,31 +95,25 @@ class GoogleWebTranslator:
 
     def translate_html(self, value: str, pair: LanguagePair) -> str:
         """Translate one fragment, reusing only successful cached responses."""
-        if len(value.encode()) > MAX_PROVIDER_FRAGMENT_BYTES:
-            detail = "serialized fragment exceeds provider byte limit"
+        request = _provider_request(value, pair)
+        if len(str(request.url).encode()) > MAX_PROVIDER_REQUEST_BYTES:
+            detail = "serialized request exceeds provider byte limit"
             raise ProviderUnavailableError(detail=detail)
         cache_key = self._cache_key(value, pair)
         cached = self._cache.get(cache_key)
         if cached is not None:
             return cached
-        translated = self._request_with_retries(value, pair)
+        translated = self._request_with_retries(request)
         self._cache.put(cache_key, translated)
         return translated
 
-    def _request_with_retries(self, value: str, pair: LanguagePair) -> str:
+    def _request_with_retries(self, request: httpx2.Request) -> str:
         last_detail = "no request attempted"
         for attempt in range(self._config.retries + 1):
             try:
                 with self._client.stream(
                     "GET",
-                    _ENDPOINT,
-                    params={
-                        "client": "gtx",
-                        "sl": pair.source,
-                        "tl": pair.target,
-                        "dt": "t",
-                        "q": value,
-                    },
+                    request.url,
                 ) as response:
                     _ = response.raise_for_status()
                     body = _read_bounded_response(response)
@@ -146,7 +138,10 @@ class GoogleWebTranslator:
 
     def close(self) -> None:
         """Release the provider HTTP connection pool."""
-        self._client.close()
+        try:
+            self._cache.close()
+        finally:
+            self._client.close()
 
     def __enter__(self) -> Self:
         return self
@@ -173,6 +168,20 @@ def _create_http_client() -> httpx2.Client:
         timeout=_TIMEOUT,
         follow_redirects=True,
         headers={"User-Agent": "epub-bilingual-translator/0.1"},
+    )
+
+
+def _provider_request(value: str, pair: LanguagePair) -> httpx2.Request:
+    return httpx2.Request(
+        "GET",
+        _ENDPOINT,
+        params={
+            "client": "gtx",
+            "sl": pair.source,
+            "tl": pair.target,
+            "dt": "t",
+            "q": value,
+        },
     )
 
 

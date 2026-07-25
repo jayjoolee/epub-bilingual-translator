@@ -6,6 +6,7 @@ import httpx2
 import pytest
 
 from epub_bilingual_translator import epub, models
+from epub_bilingual_translator.cache import TranslationCache
 from tests.helpers import write_epub
 from tests.test_epub import options
 from tests.test_google import (
@@ -69,6 +70,14 @@ def translation_body_at_size(size: int) -> bytes:
     return prefix + (b"x" * (size - len(prefix) - len(suffix))) + suffix
 
 
+def serialized_google_url(value: str) -> httpx2.URL:
+    return httpx2.Request(
+        "GET",
+        "https://translate.googleapis.com/translate_a/single",
+        params={"client": "gtx", "sl": "en", "tl": "ko", "dt": "t", "q": value},
+    ).url
+
+
 def test_oversized_serialized_fragment_is_rejected_before_cache_or_http(
     tmp_path: Path,
 ) -> None:
@@ -86,9 +95,86 @@ def test_oversized_serialized_fragment_is_rejected_before_cache_or_http(
 
     # Then
     assert client.calls == 0
-    assert "fragment" in str(caught.value)
+    assert "request" in str(caught.value)
     assert value not in str(caught.value)
     assert not cache_entry(cache_dir, value).exists()
+
+
+def test_raw_under_limit_but_percent_encoded_url_over_limit_skips_cache_and_http(
+    tmp_path: Path,
+) -> None:
+    # Given
+    value = "&" * (FRAGMENT_BYTE_LIMIT // 2)
+    serialized_url = serialized_google_url(value)
+    client = FakeHttpClient([])
+    cache_dir = tmp_path / "cache"
+    seed_cache = TranslationCache(cache_dir)
+    seed_cache.put(cache_entry(cache_dir, value).name, "cached translation")
+    seed_cache.close()
+
+    # When
+    with (
+        translator(cache_dir, client) as provider,
+        pytest.raises(models.ProviderUnavailableError) as caught,
+    ):
+        _ = provider.translate_html(value, PAIR)
+
+    # Then
+    assert len(value.encode()) < FRAGMENT_BYTE_LIMIT
+    assert len(str(serialized_url).encode()) > FRAGMENT_BYTE_LIMIT
+    assert client.calls == 0
+    assert value not in str(caught.value)
+
+
+def test_request_uses_verified_serialized_url(tmp_path: Path) -> None:
+    # Given
+    value = "한글 & markup?"
+    expected_url = serialized_google_url(value)
+    client = FakeHttpClient([response(200, '[[["정상"]]]')])
+
+    # When
+    with translator(tmp_path / "cache", client) as provider:
+        translated = provider.translate_html(value, PAIR)
+
+    # Then
+    assert translated == "정상"
+    assert client.urls == [expected_url]
+
+
+def test_request_at_exact_serialized_limit_is_allowed(tmp_path: Path) -> None:
+    # Given
+    empty_request_bytes = len(str(serialized_google_url("")).encode())
+    value = "x" * (FRAGMENT_BYTE_LIMIT - empty_request_bytes)
+    expected_url = serialized_google_url(value)
+    client = FakeHttpClient([response(200, '[[["정상"]]]')])
+
+    # When
+    with translator(tmp_path / "cache", client) as provider:
+        translated = provider.translate_html(value, PAIR)
+
+    # Then
+    assert len(str(expected_url).encode()) == FRAGMENT_BYTE_LIMIT
+    assert translated == "정상"
+    assert client.urls == [expected_url]
+
+
+def test_request_one_byte_over_serialized_limit_is_rejected(tmp_path: Path) -> None:
+    # Given
+    empty_request_bytes = len(str(serialized_google_url("")).encode())
+    value = "x" * (FRAGMENT_BYTE_LIMIT - empty_request_bytes + 1)
+    client = FakeHttpClient([])
+
+    # When
+    with (
+        translator(tmp_path / "cache", client) as provider,
+        pytest.raises(models.ProviderUnavailableError) as caught,
+    ):
+        _ = provider.translate_html(value, PAIR)
+
+    # Then
+    assert len(str(serialized_google_url(value)).encode()) == FRAGMENT_BYTE_LIMIT + 1
+    assert client.calls == 0
+    assert value not in str(caught.value)
 
 
 def test_oversized_serialized_fragment_removes_epub_output_and_temp(

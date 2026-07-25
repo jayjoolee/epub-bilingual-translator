@@ -27,7 +27,8 @@ translation-first bilingual EPUB while leaving the source untouched.
 
 ## Quick start
 
-[Install uv](https://docs.astral.sh/uv/getting-started/installation/), then run:
+On macOS or Linux, [install uv](https://docs.astral.sh/uv/getting-started/installation/),
+then run:
 
 ```bash
 uvx --from git+https://github.com/jayjoolee/epub-bilingual-translator \
@@ -68,9 +69,10 @@ marked `translate="no"` or `notranslate`.
 Before translation, the CLI validates the EPUB mimetype and container, refuses encrypted ZIP
 members, unsafe paths, duplicates, and suspicious compression ratios, and bounds archive work
 to 10,000 members, 512 MiB per member, 2 GiB total uncompressed data, and 16 MiB per XHTML
-document. Serialized provider fragments are capped at 32 KiB and responses are streamed under
-a 1 MiB ceiling. Output publication is atomic and will not replace a file that appears during
-a run.
+document. Fully serialized provider request URLs are capped at 32 KiB and responses are
+streamed under a 1 MiB ceiling. The private local cache rejects symbolic links in its path and
+anchors file operations to a verified user-owned directory. Output publication is atomic and
+will not replace a file that appears during a run.
 
 ## Real-world verification
 
