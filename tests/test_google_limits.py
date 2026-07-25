@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Final, final, override
 import httpx2
 import pytest
 
-from epub_bilingual_translator import epub, models
+from epub_bilingual_translator import epub, google, models
 from epub_bilingual_translator.cache import TranslationCache
 from tests.helpers import write_epub
 from tests.test_epub import options
@@ -175,6 +175,57 @@ def test_request_one_byte_over_serialized_limit_is_rejected(tmp_path: Path) -> N
     assert len(str(serialized_google_url(value)).encode()) == FRAGMENT_BYTE_LIMIT + 1
     assert client.calls == 0
     assert value not in str(caught.value)
+
+
+def test_redirect_to_oversized_url_is_not_followed_or_cached(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Given
+    value = "redirect me"
+    oversized_url = f"https://translate.invalid/?q={'x' * FRAGMENT_BYTE_LIMIT}"
+    observed_urls: list[httpx2.URL] = []
+
+    def handle_request(request: httpx2.Request) -> httpx2.Response:
+        observed_urls.append(request.url)
+        return httpx2.Response(
+            302,
+            headers={"Location": oversized_url},
+            request=request,
+        )
+
+    transport = httpx2.MockTransport(handle_request)
+
+    def create_mock_transport(
+        *,
+        http2: bool,
+        retries: int,
+        limits: httpx2.Limits,
+        socket_options: list[tuple[int, int, int]],
+    ) -> httpx2.MockTransport:
+        del http2, retries, limits, socket_options
+        return transport
+
+    monkeypatch.setattr(
+        httpx2,
+        "HTTPTransport",
+        create_mock_transport,
+    )
+    cache_dir = tmp_path / "cache"
+
+    # When
+    with (
+        google.GoogleWebTranslator(
+            google.GoogleConfig(cache_dir=cache_dir, retries=0),
+        ) as provider,
+        pytest.raises(models.ProviderUnavailableError, match="HTTP 302"),
+    ):
+        _ = provider.translate_html(value, PAIR)
+
+    # Then
+    assert len(observed_urls) == 1
+    assert len(str(observed_urls[0]).encode()) < FRAGMENT_BYTE_LIMIT
+    assert not cache_entry(cache_dir, value).exists()
 
 
 def test_oversized_serialized_fragment_removes_epub_output_and_temp(

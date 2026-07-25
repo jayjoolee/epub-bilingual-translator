@@ -166,7 +166,7 @@ def _create_http_client() -> httpx2.Client:
     return httpx2.Client(
         transport=transport,
         timeout=_TIMEOUT,
-        follow_redirects=True,
+        follow_redirects=False,
         headers={"User-Agent": "epub-bilingual-translator/0.1"},
     )
 

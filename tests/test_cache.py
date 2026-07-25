@@ -86,3 +86,18 @@ def test_cache_operations_remain_anchored_after_directory_path_is_swapped(
     assert result == "anchored value"
     assert (anchored_dir / "entry").read_text(encoding="utf-8") == "anchored value"
     assert not (cache_dir / "entry").exists()
+
+
+def test_cache_put_invalid_unicode_raises_typed_error(tmp_path: Path) -> None:
+    # Given
+    cache = TranslationCache(tmp_path / "cache")
+
+    # When
+    try:
+        with pytest.raises(ProviderUnavailableError, match="cache write failed"):
+            cache.put("entry", "\ud800")
+    finally:
+        cache.close()
+
+    # Then
+    assert not (tmp_path / "cache" / "entry").exists()

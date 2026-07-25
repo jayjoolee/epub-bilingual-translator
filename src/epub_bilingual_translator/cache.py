@@ -94,7 +94,7 @@ class TranslationCache:
                 src_dir_fd=directory_fd,
                 dst_dir_fd=directory_fd,
             )
-        except OSError as error:
+        except (OSError, UnicodeError) as error:
             raise _cache_error(_CACHE_WRITE_FAILED, error) from error
         finally:
             if descriptor >= 0:
