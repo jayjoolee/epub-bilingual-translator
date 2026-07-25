@@ -20,6 +20,9 @@ MAX_XML_METADATA_BYTES: Final = 1024 * 1024
 MAX_COMPRESSION_RATIO: Final = 200.0
 COPY_CHUNK_BYTES: Final = 1024 * 1024
 XHTML_SUFFIXES: Final = (".xhtml", ".html", ".htm")
+SUPPORTED_COMPRESSION_METHODS: Final = frozenset(
+    {zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED},
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,6 +163,10 @@ def _validate_member_name(name: str) -> None:
 
 
 def _validate_member_bounds(info: zipfile.ZipInfo) -> None:
+    if info.compress_type not in SUPPORTED_COMPRESSION_METHODS:
+        raise ArchiveError(
+            detail=f"unsupported ZIP compression method: {info.filename}",
+        )
     if info.flag_bits & 0x1:
         raise ArchiveError(detail=f"ZIP-encrypted member refused: {info.filename}")
     if info.file_size < 0 or info.file_size > MAX_MEMBER_BYTES:

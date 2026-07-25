@@ -5,10 +5,17 @@ import zipfile
 from typing import TYPE_CHECKING, Literal, assert_never
 
 import pytest
+from typer.testing import CliRunner
 
-from epub_bilingual_translator import epub, models
-from tests.helpers import ZipMember, valid_epub_members, write_zip
+from epub_bilingual_translator import cli, epub, models
+from tests.helpers import (
+    ZipMember,
+    patch_zip_compression_method,
+    valid_epub_members,
+    write_zip,
+)
 from tests.test_epub import RecordingTranslator, options
+from tests.test_epub_safety import cli_test_translator
 
 if TYPE_CHECKING:
     import pathlib
@@ -136,3 +143,53 @@ def test_suspicious_compression_ratio_is_rejected_with_small_fixture(
 
     # Then
     assert not output.exists()
+
+
+def test_unsupported_compression_is_rejected_before_provider_use(
+    tmp_path: pathlib.Path,
+) -> None:
+    # Given
+    source = tmp_path / "unsupported.epub"
+    output = tmp_path / "translated.epub"
+    members = valid_epub_members("Sentence.")
+    members.append(ZipMember("OEBPS/unsupported.bin", b"asset"))
+    write_zip(source, members)
+    patch_zip_compression_method(source, "OEBPS/unsupported.bin", 99)
+    translator = RecordingTranslator(max_chars=2_800)
+
+    # When
+    with pytest.raises(models.ArchiveError, match="unsupported ZIP compression"):
+        _ = epub.translate_epub(options(source, output), translator)
+
+    # Then
+    assert translator.requests == []
+    assert not output.exists()
+    assert list(tmp_path.glob(".*.epub.tmp")) == []
+
+
+def test_cli_reports_unsupported_compression_without_private_details(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Given
+    source = tmp_path / "private-source.epub"
+    output = tmp_path / "translated.epub"
+    members = valid_epub_members("Sentence.")
+    members.append(ZipMember("OEBPS/unsupported.bin", b"asset"))
+    write_zip(source, members)
+    patch_zip_compression_method(source, "OEBPS/unsupported.bin", 99)
+    monkeypatch.setattr(cli, "create_default_translator", cli_test_translator)
+
+    # When
+    result = CliRunner().invoke(
+        cli.app,
+        [str(source), "--output", str(output)],
+    )
+
+    # Then
+    assert result.exit_code == 1
+    assert "unsupported ZIP compression" in result.output
+    assert "Traceback" not in result.output
+    assert str(tmp_path) not in result.output
+    assert not output.exists()
+    assert list(tmp_path.glob(".*.epub.tmp")) == []

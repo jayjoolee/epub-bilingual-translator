@@ -88,6 +88,38 @@ def write_zip(path: pathlib.Path, members: list[ZipMember]) -> None:
             )
 
 
+def patch_zip_compression_method(
+    path: pathlib.Path,
+    member_name: str,
+    method: int,
+) -> None:
+    data = bytearray(path.read_bytes())
+    target = member_name.encode()
+    matches = 0
+    layouts = (
+        (b"PK\x03\x04", 8, 26, 30),
+        (b"PK\x01\x02", 10, 28, 46),
+    )
+    for signature, method_offset, name_length_offset, name_offset in layouts:
+        cursor = 0
+        while (cursor := data.find(signature, cursor)) >= 0:
+            name_length = int.from_bytes(
+                data[cursor + name_length_offset : cursor + name_length_offset + 2],
+                "little",
+            )
+            name = bytes(
+                data[cursor + name_offset : cursor + name_offset + name_length],
+            )
+            if name == target:
+                data[cursor + method_offset : cursor + method_offset + 2] = (
+                    method.to_bytes(2, "little")
+                )
+                matches += 1
+            cursor += len(signature)
+    assert matches == 2
+    _ = path.write_bytes(data)
+
+
 def read_paragraphs(path: pathlib.Path) -> list[ET.Element]:
     with zipfile.ZipFile(path) as archive:
         chapter = archive.read("OEBPS/chapter.xhtml")

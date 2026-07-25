@@ -21,6 +21,7 @@ from epub_bilingual_translator.models import (
 
 if TYPE_CHECKING:
     import types
+    from contextlib import AbstractContextManager
     from pathlib import Path
 
 type JsonScalar = str | int | float | bool | None
@@ -28,6 +29,8 @@ type JsonValue = JsonScalar | list[JsonValue] | dict[str, JsonValue]
 
 _ENDPOINT: Final = "https://translate.googleapis.com/translate_a/single"
 _TRANSIENT_STATUSES: Final = frozenset({429, 500, 502, 503, 504})
+MAX_PROVIDER_FRAGMENT_BYTES: Final = 32 * 1024
+MAX_PROVIDER_RESPONSE_BYTES: Final = 1024 * 1024
 _LIMITS: Final = httpx2.Limits(
     max_connections=200,
     max_keepalive_connections=40,
@@ -60,13 +63,14 @@ class GoogleConfig:
 class HttpClient(Protocol):
     """Narrow synchronous client seam for deterministic provider tests."""
 
-    def get(
+    def stream(
         self,
+        method: str,
         url: str,
         *,
         params: Mapping[str, str],
-    ) -> httpx2.Response:
-        """Return one translation endpoint response."""
+    ) -> AbstractContextManager[httpx2.Response]:
+        """Open one streaming translation endpoint response."""
         ...
 
     def close(self) -> None:
@@ -93,6 +97,9 @@ class GoogleWebTranslator:
 
     def translate_html(self, value: str, pair: LanguagePair) -> str:
         """Translate one fragment, reusing only successful cached responses."""
+        if len(value.encode()) > MAX_PROVIDER_FRAGMENT_BYTES:
+            detail = "serialized fragment exceeds provider byte limit"
+            raise ProviderUnavailableError(detail=detail)
         cache_key = self._cache_key(value, pair)
         cached = self._cache.get(cache_key)
         if cached is not None:
@@ -105,7 +112,8 @@ class GoogleWebTranslator:
         last_detail = "no request attempted"
         for attempt in range(self._config.retries + 1):
             try:
-                response = self._client.get(
+                with self._client.stream(
+                    "GET",
                     _ENDPOINT,
                     params={
                         "client": "gtx",
@@ -114,9 +122,10 @@ class GoogleWebTranslator:
                         "dt": "t",
                         "q": value,
                     },
-                )
-                _ = response.raise_for_status()
-                return parse_google_translation(response.text)
+                ) as response:
+                    _ = response.raise_for_status()
+                    body = _read_bounded_response(response)
+                return parse_google_translation(_decode_response(body))
             except httpx2.HTTPStatusError as error:
                 status_code = error.response.status_code
                 last_detail = f"HTTP {status_code} from translation provider"
@@ -126,6 +135,7 @@ class GoogleWebTranslator:
                 last_detail = f"network request failed ({type(error).__name__})"
             except ProviderResponseError:
                 last_detail = "translation provider returned an invalid response"
+                break
             if attempt < self._config.retries:
                 self._sleeper(float(min(1 << attempt, 8)))
         raise ProviderUnavailableError(detail=last_detail)
@@ -164,6 +174,36 @@ def _create_http_client() -> httpx2.Client:
         follow_redirects=True,
         headers={"User-Agent": "epub-bilingual-translator/0.1"},
     )
+
+
+def _read_bounded_response(response: httpx2.Response) -> bytes | None:
+    declared_lengths = response.headers.get_list("content-length")
+    if len(declared_lengths) > 1:
+        return None
+    if declared_lengths:
+        try:
+            declared_bytes = int(declared_lengths[0])
+        except ValueError:
+            return None
+        if declared_bytes < 0 or declared_bytes > MAX_PROVIDER_RESPONSE_BYTES:
+            return None
+    body = bytearray()
+    for chunk in response.iter_bytes():
+        if len(chunk) > MAX_PROVIDER_RESPONSE_BYTES - len(body):
+            return None
+        body.extend(chunk)
+    return bytes(body)
+
+
+def _decode_response(body: bytes | None) -> str:
+    if body is None:
+        detail = "response exceeded provider byte limit"
+        raise ProviderResponseError(detail=detail)
+    try:
+        return body.decode()
+    except UnicodeDecodeError as error:
+        detail = "response was not valid UTF-8"
+        raise ProviderResponseError(detail=detail) from error
 
 
 def parse_google_translation(value: str) -> str:

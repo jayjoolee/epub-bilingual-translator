@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import os
 import stat
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, assert_never, final
 
@@ -12,7 +13,7 @@ import pytest
 from epub_bilingual_translator import google, models
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable, Generator, Mapping
 
 PAIR = models.LanguagePair(source="en", target="ko")
 SENTINEL = "PRIVATE_FRAGMENT_SENTINEL"
@@ -28,13 +29,22 @@ class FakeHttpClient:
         self.calls: int = 0
         self.closed: bool = False
 
-    def get(
+    @contextmanager
+    def stream(
         self,
+        method: str,
         url: str,
         *,
         params: Mapping[str, str],
-    ) -> httpx2.Response:
-        del url, params
+    ) -> Generator[httpx2.Response]:
+        del method, url, params
+        response = self._next_response()
+        try:
+            yield response
+        finally:
+            response.close()
+
+    def _next_response(self) -> httpx2.Response:
         self.calls += 1
         if not self.outcomes:
             detail = "unexpected HTTP request"
@@ -114,15 +124,23 @@ def test_malformed_provider_response_is_typed_and_not_cached(
     # Given
     cache_dir = tmp_path / "cache"
     client = FakeHttpClient([response(200, "not-json")])
+    sleeps: list[float] = []
 
     # When
     with (
-        translator(cache_dir, client) as provider,
+        translator(
+            cache_dir,
+            client,
+            retries=3,
+            sleeper=sleeps.append,
+        ) as provider,
         pytest.raises(models.ProviderUnavailableError) as caught,
     ):
         _ = provider.translate_html(SENTINEL, PAIR)
 
     # Then
+    assert client.calls == 1
+    assert sleeps == []
     assert SENTINEL not in str(caught.value)
     assert not cache_entry(cache_dir, SENTINEL).exists()
 
