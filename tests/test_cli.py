@@ -6,7 +6,7 @@ import pytest
 from typer.testing import CliRunner
 
 from epub_bilingual_translator import cli, models
-from tests.helpers import write_epub
+from tests.helpers import ZipMember, valid_epub_members, write_epub, write_zip
 
 if TYPE_CHECKING:
     import pathlib
@@ -81,6 +81,29 @@ def test_default_output_uses_target_and_injected_provider(
     assert result.exit_code == 0
     assert output.is_file()
     assert str(output) in result.stdout
+
+
+def test_unsafe_member_name_with_rich_markup_has_concise_typed_cli_error(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Given
+    source = tmp_path / "unsafe.epub"
+    output = tmp_path / "translated.epub"
+    members = valid_epub_members("Hello world.")
+    members.append(ZipMember("../[/red]", b"unsafe"))
+    write_zip(source, members)
+    monkeypatch.setattr(cli, "create_default_translator", fake_translator)
+
+    # When
+    result = CliRunner().invoke(cli.app, [str(source), "--output", str(output)])
+
+    # Then
+    assert result.exit_code == 1
+    assert "invalid EPUB: unsafe ZIP member name: ../[/red]" in result.output
+    assert "MarkupError" not in result.output
+    assert "Traceback" not in result.output
+    assert not output.exists()
 
 
 @pytest.mark.parametrize(

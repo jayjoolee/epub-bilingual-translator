@@ -198,6 +198,35 @@ def test_standard_font_obfuscation_is_preserved_without_decryption(
         )
 
 
+def test_ambiguous_casefold_encryption_metadata_is_refused_before_translation(
+    tmp_path: pathlib.Path,
+) -> None:
+    # Given
+    source = tmp_path / "ambiguous-encryption.epub"
+    output = tmp_path / "translated.epub"
+    write_epub(
+        source,
+        "Secret.",
+        encryption_xml=_encryption_xml(FONT_OBFUSCATION_ALGORITHM),
+        extra_members=(
+            ZipMember("OEBPS/fonts/fixture.otf", FONT_DATA),
+            ZipMember(
+                "meta-inf/ENCRYPTION.XML",
+                _encryption_xml("http://www.w3.org/2001/04/xmlenc#aes256-cbc"),
+            ),
+        ),
+    )
+    translator = RecordingTranslator(max_chars=2_800)
+
+    # When
+    with pytest.raises(models.DrmProtectedError):
+        _ = epub.translate_epub(options(source, output), translator)
+
+    # Then
+    assert translator.requests == []
+    assert not output.exists()
+
+
 @pytest.mark.parametrize(
     "algorithm",
     [None, "http://www.w3.org/2001/04/xmlenc#aes256-cbc"],

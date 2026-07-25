@@ -60,6 +60,7 @@ _CIPHER_DATA: Final = "{http://www.w3.org/2001/04/xmlenc#}CipherData"
 _CIPHER_REFERENCE: Final = "{http://www.w3.org/2001/04/xmlenc#}CipherReference"
 _FONT_OBFUSCATION: Final = "http://www.idpf.org/2008/embedding"
 _FONT_SUFFIXES: Final = frozenset({".otf", ".ttf", ".woff", ".woff2"})
+_MAX_XHTML_NESTING: Final = 256
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,6 +118,7 @@ def translate_epub(
 
 def _translate_document(data: bytes, context: _TransformContext) -> _DocumentResult:
     root = DefusedET.fromstring(data)
+    _validate_xhtml_nesting(root)
     blocks = 0
     chunks = 0
     translated_bytes = 0
@@ -179,12 +181,14 @@ def _local_name(element: ET.Element) -> str:
 
 def _validate_encryption(source: zipfile.ZipFile) -> None:
     members = source.namelist()
-    encryption_member = next(
-        (member for member in members if member.casefold() == _ENCRYPTION_MEMBER),
-        None,
-    )
-    if encryption_member is None:
+    encryption_members = [
+        member for member in members if member.casefold() == _ENCRYPTION_MEMBER
+    ]
+    if not encryption_members:
         return
+    if len(encryption_members) != 1:
+        raise DrmProtectedError(member=_ENCRYPTION_MEMBER)
+    encryption_member = encryption_members[0]
     try:
         info = source.getinfo(encryption_member)
         root = DefusedET.fromstring(
@@ -228,6 +232,15 @@ def _is_font_reference(uri: str | None, members: list[str]) -> bool:
     ):
         return False
     return normalized.suffix.casefold() in _FONT_SUFFIXES and path in members
+
+
+def _validate_xhtml_nesting(root: ET.Element) -> None:
+    pending = [(root, 1)]
+    while pending:
+        element, depth = pending.pop()
+        if depth > _MAX_XHTML_NESTING:
+            raise ArchiveError(detail="XHTML nesting exceeds limit")
+        pending.extend((child, depth + 1) for child in element)
 
 
 def _validate_paths(options: Options) -> None:

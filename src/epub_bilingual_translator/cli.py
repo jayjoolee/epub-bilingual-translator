@@ -8,6 +8,7 @@ from typing import Annotated, Final
 
 import typer
 from rich.console import Console
+from rich.text import Text
 
 from epub_bilingual_translator import __version__
 from epub_bilingual_translator.epub import translate_epub
@@ -125,7 +126,9 @@ def translate_command(
         ):
             result = translate_epub(options, translator)
     except EpubTranslationError as error:
-        _error_console.print(f"[red]Translation failed:[/red] {error}")
+        _error_console.print(
+            Text.assemble(("Translation failed:", "red"), " ", str(error)),
+        )
         raise typer.Exit(code=1) from None
     summary = " ".join(
         (

@@ -375,6 +375,32 @@ def test_bare_ampersand_repair_expansion_is_refused_before_allocation(
     assert list(tmp_path.glob(".*.epub.tmp")) == []
 
 
+def test_deep_xhtml_nesting_is_refused_before_provider_use(
+    tmp_path: pathlib.Path,
+) -> None:
+    # Given
+    source = tmp_path / "deep.xhtml.epub"
+    output = tmp_path / "translated.epub"
+    nesting = 990
+    chapter = (
+        f'<?xml version="1.0" encoding="utf-8"?>'
+        f'<html xmlns="{XHTML}"><body><p>'
+        f"{'<span>' * nesting}deep{'</span>' * nesting}"
+        "</p></body></html>"
+    ).encode()
+    write_epub_with_chapter(source, chapter)
+    translator = RecordingTranslator(max_chars=2_800)
+
+    # When
+    with pytest.raises(models.ArchiveError, match="XHTML nesting exceeds limit"):
+        _ = epub.translate_epub(options(source, output), translator)
+
+    # Then
+    assert translator.requests == []
+    assert not output.exists()
+    assert list(tmp_path.glob(".*.epub.tmp")) == []
+
+
 def cli_test_translator() -> CliTestManagedTranslator:
     return CliTestManagedTranslator()
 
