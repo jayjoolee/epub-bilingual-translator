@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+import os
 import zipfile
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING, Never, Self
 from xml.etree import ElementTree as ET
 
 import pytest
 from typer.testing import CliRunner
 
-from epub_bilingual_translator import cli, epub, models
+from epub_bilingual_translator import cli, epub, models, staging
 from tests.helpers import XHTML, read_paragraphs, write_epub, write_epub_with_chapter
 from tests.test_epub import RecordingTranslator, options
 
@@ -25,6 +26,31 @@ class DestinationRaceTranslator:
     def translate_html(self, value: str, pair: models.LanguagePair) -> str:
         del pair
         _ = self.destination.write_bytes(b"sentinel")
+        return value
+
+
+class StagingPathSwapTranslator:
+    engine_id: str = "staging-path-swap"
+
+    def __init__(
+        self,
+        output: pathlib.Path,
+        victim_directory: pathlib.Path,
+    ) -> None:
+        self.output: pathlib.Path = output
+        self.victim_directory: pathlib.Path = victim_directory
+        self.renamed_stage: pathlib.Path = output.parent / "renamed-stage"
+        self.visible_stage: pathlib.Path | None = None
+
+    def translate_html(self, value: str, pair: models.LanguagePair) -> str:
+        del pair
+        stages = list(
+            self.output.parent.glob(f".{self.output.stem}-*.epub.tmp"),
+        )
+        assert len(stages) == 1
+        self.visible_stage = stages[0]
+        _ = self.visible_stage.rename(self.renamed_stage)
+        self.visible_stage.symlink_to(self.victim_directory, target_is_directory=True)
         return value
 
 
@@ -137,6 +163,98 @@ def test_destination_created_during_translation_is_not_overwritten(
 
     # Then
     assert output.read_bytes() == b"sentinel"
+    assert list(tmp_path.glob(".*.epub.tmp")) == []
+
+
+@pytest.mark.skipif(
+    os.name != "posix",
+    reason="requires POSIX dirfd semantics",
+)
+def test_staging_path_swap_cannot_redirect_zip_write_or_publication(
+    tmp_path: pathlib.Path,
+) -> None:
+    # Given
+    source = tmp_path / "source.epub"
+    output = tmp_path / "translated.epub"
+    victim_directory = tmp_path / "victim"
+    victim_directory.mkdir()
+    write_epub(source, "Race.")
+    translator = StagingPathSwapTranslator(output, victim_directory)
+
+    # When
+    result = epub.translate_epub(options(source, output), translator)
+
+    # Then
+    assert result.output_path == output
+    assert zipfile.is_zipfile(output)
+    assert list(victim_directory.iterdir()) == []
+    assert list(translator.renamed_stage.iterdir()) == []
+    assert translator.visible_stage is not None
+    assert translator.visible_stage.is_symlink()
+
+
+def test_staging_closes_unowned_descriptor_when_fdopen_fails(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Given
+    source = tmp_path / "source.epub"
+    output = tmp_path / "translated.epub"
+    captured_descriptors: list[int] = []
+    write_epub(source, "Descriptor handoff.")
+
+    def fail_fdopen(descriptor: int, mode: str) -> Never:
+        del mode
+        captured_descriptors.append(descriptor)
+        detail = "injected fdopen failure"
+        raise OSError(detail)
+
+    monkeypatch.setattr(os, "fdopen", fail_fdopen)
+
+    # When
+    with pytest.raises(models.ArchiveError, match="archive I/O failed"):
+        _ = epub.translate_epub(
+            options(source, output),
+            RecordingTranslator(max_chars=2_800),
+        )
+
+    # Then
+    assert len(captured_descriptors) == 1
+    with pytest.raises(OSError, match="Bad file descriptor"):
+        _ = os.fstat(captured_descriptors[0])
+    assert not output.exists()
+    assert list(tmp_path.glob(".*.epub.tmp")) == []
+
+
+def test_staging_cleanup_error_does_not_mask_active_translation_error(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Given
+    output = tmp_path / "translated.epub"
+    staged = staging.StagedOutput(output)
+
+    def fail_close(instance: staging.StagedOutput) -> None:
+        del instance
+        raise models.ArchiveError(detail="injected cleanup failure")
+
+    # When
+    try:
+        with monkeypatch.context() as scoped_patch:
+            scoped_patch.setattr(staging.StagedOutput, "close", fail_close)
+            with (
+                pytest.raises(
+                    models.ProviderUnavailableError,
+                    match="primary failure",
+                ),
+                staged,
+            ):
+                raise models.ProviderUnavailableError(detail="primary failure")
+    finally:
+        staged.close()
+
+    # Then
+    assert not output.exists()
     assert list(tmp_path.glob(".*.epub.tmp")) == []
 
 

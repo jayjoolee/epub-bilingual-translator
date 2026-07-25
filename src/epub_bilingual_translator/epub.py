@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 import zipfile
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import PurePosixPath
 from typing import Final
 from urllib.parse import unquote, urlsplit
 from xml.etree import ElementTree as ET
@@ -18,11 +18,8 @@ from epub_bilingual_translator.archive import (
     MAX_XML_METADATA_BYTES,
     XHTML_SUFFIXES,
     copy_member_streaming,
-    create_temporary_output,
-    publish_no_clobber,
     read_member_bounded,
     validate_archive,
-    verify_output,
     write_transformed_member,
 )
 from epub_bilingual_translator.html import (
@@ -41,6 +38,7 @@ from epub_bilingual_translator.models import (
     TranslationResult,
     Translator,
 )
+from epub_bilingual_translator.staging import StagedOutput
 from epub_bilingual_translator.xhtml import (
     inner_markup,
     serialize_document_bounded,
@@ -85,26 +83,25 @@ def translate_epub(
     """Create a complete bilingual EPUB atomically or leave no output."""
     _validate_paths(options)
     context = _TransformContext(translator, options.pair, options.max_chars)
-    temporary: Path | None = None
     blocks = 0
     chunks = 0
     try:
         with zipfile.ZipFile(options.input_path) as source:
             plan = validate_archive(source)
             _validate_encryption(source)
-            temporary = create_temporary_output(options.output_path)
-            with zipfile.ZipFile(temporary, "w") as destination:
-                for info in plan.entries:
-                    if info.filename.casefold().endswith(XHTML_SUFFIXES):
-                        data = read_member_bounded(source, info, MAX_XHTML_BYTES)
-                        document = _translate_document(data, context)
-                        write_transformed_member(destination, info, document.data)
-                        blocks += document.blocks
-                        chunks += document.chunks
-                    else:
-                        copy_member_streaming(source, destination, info)
-        verify_output(temporary)
-        publish_no_clobber(temporary, options.output_path)
+            with StagedOutput(options.output_path) as staged:
+                with zipfile.ZipFile(staged.stream, "w") as destination:
+                    for info in plan.entries:
+                        if info.filename.casefold().endswith(XHTML_SUFFIXES):
+                            data = read_member_bounded(source, info, MAX_XHTML_BYTES)
+                            document = _translate_document(data, context)
+                            write_transformed_member(destination, info, document.data)
+                            blocks += document.blocks
+                            chunks += document.chunks
+                        else:
+                            copy_member_streaming(source, destination, info)
+                staged.verify()
+                staged.publish()
     except DefusedXmlException as error:
         raise ArchiveError(detail="unsafe XML content") from error
     except ET.ParseError as error:
@@ -115,9 +112,6 @@ def translate_epub(
         raise ArchiveError(detail="corrupt ZIP archive") from error
     except OSError as error:
         raise ArchiveError(detail=f"archive I/O failed: {error}") from error
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
     return TranslationResult(options.output_path, blocks, chunks)
 
 

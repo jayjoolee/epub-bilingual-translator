@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import os
-import tempfile
 import zipfile
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import PurePosixPath
 from typing import Final
 
-from epub_bilingual_translator.models import ArchiveError, OutputPathError
+from epub_bilingual_translator.models import ArchiveError
 
 MIMETYPE_BYTES: Final = b"application/epub+zip"
 MAX_MEMBER_COUNT: Final = 10_000
@@ -114,38 +112,6 @@ def write_transformed_member(
     if len(data) > MAX_XHTML_BYTES:
         raise ArchiveError(detail=f"translated XHTML exceeds limit: {info.filename}")
     destination.writestr(info, data)
-
-
-def create_temporary_output(output_path: Path) -> Path:
-    """Create a same-directory temporary file for atomic publication."""
-    descriptor, raw_path = tempfile.mkstemp(
-        prefix=f".{output_path.stem}-",
-        suffix=".epub.tmp",
-        dir=output_path.parent,
-    )
-    os.close(descriptor)
-    return Path(raw_path)
-
-
-def publish_no_clobber(temporary: Path, output_path: Path) -> None:
-    """Atomically publish through a same-filesystem hard link without overwrite."""
-    try:
-        os.link(temporary, output_path, follow_symlinks=False)
-    except FileExistsError as error:
-        raise OutputPathError(
-            output_path,
-            "output appeared during translation",
-        ) from error
-    except OSError as error:
-        raise ArchiveError(detail=f"could not publish output: {error}") from error
-
-
-def verify_output(path: Path) -> None:
-    """Exercise CRC checks for every generated archive member."""
-    with zipfile.ZipFile(path) as archive:
-        broken = archive.testzip()
-    if broken is not None:
-        raise ArchiveError(detail=f"corrupt output member: {broken}")
 
 
 def _validate_member_name(name: str) -> None:
