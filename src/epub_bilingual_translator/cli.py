@@ -110,7 +110,10 @@ def translate_command(
         ),
     ] = False,
 ) -> None:
-    """Create a translation-first bilingual EPUB with the original retained."""
+    """Create a translation-first bilingual EPUB with the original retained.
+
+    Book text is sent to Google's unofficial web translation endpoint.
+    """
     del version
     destination = output_path or default_output_path(input_path, target)
     options = Options(

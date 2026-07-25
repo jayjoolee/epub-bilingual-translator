@@ -24,8 +24,12 @@ HTML 태그를 균형 있게 유지한 뒤, 번역문과 원문이 함께 있는
 macOS 또는 Linux에서
 [uv를 설치](https://docs.astral.sh/uv/getting-started/installation/)한 다음 실행하세요.
 
+> **개인정보:** 책 본문은 Google의 비공식 웹 번역 엔드포인트로 전송됩니다.
+> 처리할 권한이 있는 책만 번역하세요. 자세한 내용은
+> [개인정보, 서비스 제한 및 DRM](#개인정보-서비스-제한-및-drm)을 확인하세요.
+
 ```bash
-uvx --from git+https://github.com/jayjoolee/epub-bilingual-translator \
+uvx --from git+https://github.com/jayjoolee/epub-bilingual-translator@v0.1.0 \
   epub-translate "책.epub" --to ko
 ```
 
@@ -38,7 +42,7 @@ uvx --from git+https://github.com/jayjoolee/epub-bilingual-translator \
 자주 사용한다면:
 
 ```bash
-uv tool install git+https://github.com/jayjoolee/epub-bilingual-translator
+uv tool install git+https://github.com/jayjoolee/epub-bilingual-translator@v0.1.0
 epub-translate "책.epub" --to ko
 ```
 
@@ -99,7 +103,8 @@ epub-translate "책.epub" --to ja --output "책.ja.bilingual.epub"
 ```bash
 uv run --no-project ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py \
   --repo jayjoolee/epub-bilingual-translator \
-  --path skill/translate-epub
+  --path skill/translate-epub \
+  --ref v0.1.0
 ```
 
 다음 Codex 턴부터 이렇게 요청하세요.

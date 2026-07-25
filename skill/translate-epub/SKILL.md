@@ -14,7 +14,7 @@ Create a new bilingual EPUB without modifying the source file.
 3. Run the published CLI:
 
 ```bash
-uvx --from git+https://github.com/jayjoolee/epub-bilingual-translator \
+uvx --from git+https://github.com/jayjoolee/epub-bilingual-translator@v0.1.0 \
   epub-translate "/absolute/path/book.epub" \
   --to ko \
   --output "/absolute/path/book.ko.bilingual.epub"

@@ -30,8 +30,12 @@ translation-first bilingual EPUB while leaving the source untouched.
 On macOS or Linux, [install uv](https://docs.astral.sh/uv/getting-started/installation/),
 then run:
 
+> **Privacy:** Book text is sent to Google's unofficial web translation endpoint. Only
+> translate books you have the right to process. See
+> [Privacy, service limits, and DRM](#privacy-service-limits-and-drm).
+
 ```bash
-uvx --from git+https://github.com/jayjoolee/epub-bilingual-translator \
+uvx --from git+https://github.com/jayjoolee/epub-bilingual-translator@v0.1.0 \
   epub-translate "book.epub" --to ko
 ```
 
@@ -44,7 +48,7 @@ book.ko.bilingual.epub
 For repeated use:
 
 ```bash
-uv tool install git+https://github.com/jayjoolee/epub-bilingual-translator
+uv tool install git+https://github.com/jayjoolee/epub-bilingual-translator@v0.1.0
 epub-translate "book.epub" --to ko
 ```
 
@@ -104,7 +108,8 @@ The repository includes an optional Codex skill. Install it with Codex's bundled
 ```bash
 uv run --no-project ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py \
   --repo jayjoolee/epub-bilingual-translator \
-  --path skill/translate-epub
+  --path skill/translate-epub \
+  --ref v0.1.0
 ```
 
 Then ask Codex:

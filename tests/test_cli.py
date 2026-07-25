@@ -51,6 +51,9 @@ def test_help_exposes_public_one_line_options() -> None:
     assert "--source" in help_text
     assert "--output" in help_text
     assert "--max-chars" in help_text
+    assert "Book text is sent to Google's unofficial web translation endpoint." in (
+        help_text
+    )
 
 
 def test_version_works_without_input_path() -> None:
