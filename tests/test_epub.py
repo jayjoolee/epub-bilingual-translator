@@ -7,7 +7,7 @@ import pytest
 
 from epub_bilingual_translator import epub, models
 from epub_bilingual_translator import html as html_tools
-from tests.helpers import XHTML, read_paragraphs, write_epub
+from tests.helpers import XHTML, ZipMember, read_paragraphs, write_epub
 
 if TYPE_CHECKING:
     import pathlib
@@ -171,7 +171,10 @@ def test_standard_font_obfuscation_is_preserved_without_decryption(
         source,
         "Sentence with an embedded font.",
         encryption_xml=encryption_xml,
-        font_data=FONT_DATA,
+        extra_members=(
+            ZipMember("OEBPS/fonts/fixture.otf", FONT_DATA),
+            ZipMember("OEBPS/images/cover.jpg", b"image-bytes-\xff\xd8\xff"),
+        ),
     )
     translator = RecordingTranslator(max_chars=2_800)
 
@@ -190,6 +193,9 @@ def test_standard_font_obfuscation_is_preserved_without_decryption(
         assert output_archive.read("OEBPS/fonts/fixture.otf") == source_archive.read(
             "OEBPS/fonts/fixture.otf",
         )
+        assert output_archive.read("OEBPS/images/cover.jpg") == source_archive.read(
+            "OEBPS/images/cover.jpg",
+        )
 
 
 @pytest.mark.parametrize(
@@ -207,7 +213,7 @@ def test_non_obfuscation_encryption_method_is_refused(
         source,
         "Secret.",
         encryption_xml=_encryption_xml(algorithm),
-        font_data=FONT_DATA,
+        extra_members=(ZipMember("OEBPS/fonts/fixture.otf", FONT_DATA),),
     )
     translator = RecordingTranslator(max_chars=2_800)
 

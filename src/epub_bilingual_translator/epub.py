@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import copy
-import os
 import re
-import tempfile
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -17,6 +15,18 @@ from xml.sax.saxutils import escape
 from defusedxml import ElementTree as DefusedET
 from defusedxml.common import DefusedXmlException
 
+from epub_bilingual_translator.archive import (
+    MAX_XHTML_BYTES,
+    MAX_XML_METADATA_BYTES,
+    XHTML_SUFFIXES,
+    copy_member_streaming,
+    create_temporary_output,
+    publish_no_clobber,
+    read_member_bounded,
+    validate_archive,
+    verify_output,
+    write_transformed_member,
+)
 from epub_bilingual_translator.html import split_balanced_html, visible_text
 from epub_bilingual_translator.models import (
     ArchiveError,
@@ -34,7 +44,6 @@ _BLOCK_TAGS: Final = frozenset(
     | {f"h{level}" for level in range(1, 7)},
 )
 _SKIP_TAGS: Final = frozenset({"script", "style", "pre", "code", "math", "svg"})
-_XHTML_SUFFIXES: Final = (".xhtml", ".html", ".htm")
 _ENCRYPTION_MEMBER: Final = "meta-inf/encryption.xml"
 _CONTAINER_ENCRYPTION: Final = (
     "{urn:oasis:names:tc:opendocument:xmlns:container}encryption"
@@ -72,32 +81,35 @@ def translate_epub(
     _validate_paths(options)
     context = _TransformContext(translator, options.pair, options.max_chars)
     temporary: Path | None = None
-    completed = False
     blocks = 0
     chunks = 0
     try:
         with zipfile.ZipFile(options.input_path) as source:
+            plan = validate_archive(source)
             _validate_encryption(source)
-            temporary = _temporary_output(options.output_path)
+            temporary = create_temporary_output(options.output_path)
             with zipfile.ZipFile(temporary, "w") as destination:
-                for info in _ordered_entries(source):
-                    data = source.read(info.filename)
-                    if info.filename.lower().endswith(_XHTML_SUFFIXES):
+                for info in plan.entries:
+                    if info.filename.casefold().endswith(XHTML_SUFFIXES):
+                        data = read_member_bounded(source, info, MAX_XHTML_BYTES)
                         document = _translate_document(data, context)
-                        data = document.data
+                        write_transformed_member(destination, info, document.data)
                         blocks += document.blocks
                         chunks += document.chunks
-                    _write_member(destination, info, data)
-        with zipfile.ZipFile(temporary) as result_archive:
-            broken = result_archive.testzip()
-            if broken is not None:
-                raise ArchiveError(detail=f"corrupt output member: {broken}")
-        _ = temporary.replace(options.output_path)
-        completed = True
-    except (OSError, zipfile.BadZipFile, ET.ParseError) as error:
-        raise ArchiveError(detail=str(error)) from error
+                    else:
+                        copy_member_streaming(source, destination, info)
+        verify_output(temporary)
+        publish_no_clobber(temporary, options.output_path)
+    except DefusedXmlException as error:
+        raise ArchiveError(detail="unsafe XML content") from error
+    except ET.ParseError as error:
+        raise ArchiveError(detail="malformed XML content") from error
+    except zipfile.BadZipFile as error:
+        raise ArchiveError(detail="corrupt ZIP archive") from error
+    except OSError as error:
+        raise ArchiveError(detail=f"archive I/O failed: {error}") from error
     finally:
-        if temporary is not None and not completed:
+        if temporary is not None:
             temporary.unlink(missing_ok=True)
     return TranslationResult(options.output_path, blocks, chunks)
 
@@ -119,6 +131,7 @@ def _translate_document(data: bytes, context: _TransformContext) -> _DocumentRes
                 for piece in pieces
             )
             translated_element = copy.deepcopy(original)
+            translated_element.tail = None
             _set_inner_markup(translated_element, translated)
             translated_element.set("lang", context.pair.target)
             translated_element.set("data-epub-translation", "translation")
@@ -159,38 +172,23 @@ def _set_inner_markup(element: ET.Element, markup: str) -> None:
 
 
 def _should_skip(element: ET.Element) -> bool:
-    if any(_local_name(descendant) in _SKIP_TAGS for descendant in element.iter()):
-        return True
-    if any(
+    for descendant in element.iter():
+        classes = set((descendant.get("class") or "").split())
+        if (
+            _local_name(descendant) in _SKIP_TAGS
+            or "notranslate" in classes
+            or descendant.get("translate") == "no"
+        ):
+            return True
+    return any(
         _local_name(descendant) in _BLOCK_TAGS
         for descendant in element.iter()
         if descendant is not element
-    ):
-        return True
-    classes = set((element.get("class") or "").split())
-    return "notranslate" in classes or element.get("translate") == "no"
+    )
 
 
 def _local_name(element: ET.Element) -> str:
     return element.tag.rpartition("}")[2].lower()
-
-
-def _ordered_entries(source: zipfile.ZipFile) -> list[zipfile.ZipInfo]:
-    return sorted(
-        source.infolist(),
-        key=lambda info: 0 if info.filename == "mimetype" else 1,
-    )
-
-
-def _write_member(
-    destination: zipfile.ZipFile,
-    info: zipfile.ZipInfo,
-    data: bytes,
-) -> None:
-    if info.filename == "mimetype":
-        destination.writestr("mimetype", data, compress_type=zipfile.ZIP_STORED)
-        return
-    destination.writestr(info, data)
 
 
 def _validate_encryption(source: zipfile.ZipFile) -> None:
@@ -202,7 +200,10 @@ def _validate_encryption(source: zipfile.ZipFile) -> None:
     if encryption_member is None:
         return
     try:
-        root = DefusedET.fromstring(source.read(encryption_member))
+        info = source.getinfo(encryption_member)
+        root = DefusedET.fromstring(
+            read_member_bounded(source, info, MAX_XML_METADATA_BYTES),
+        )
     except (ET.ParseError, DefusedXmlException) as error:
         raise DrmProtectedError(member=encryption_member) from error
     encrypted_data = list(root)
@@ -256,13 +257,3 @@ def _validate_paths(options: Options) -> None:
         options.output_path.parent.mkdir(parents=True, exist_ok=True)
     except OSError as error:
         raise OutputPathError(options.output_path, str(error)) from error
-
-
-def _temporary_output(output_path: Path) -> Path:
-    descriptor, raw_path = tempfile.mkstemp(
-        prefix=f".{output_path.stem}-",
-        suffix=".epub.tmp",
-        dir=output_path.parent,
-    )
-    os.close(descriptor)
-    return Path(raw_path)

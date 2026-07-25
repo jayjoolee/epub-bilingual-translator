@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Self
 
+import pytest
 from typer.testing import CliRunner
 
 from epub_bilingual_translator import cli, models
@@ -10,8 +11,6 @@ from tests.helpers import write_epub
 if TYPE_CHECKING:
     import pathlib
     import types
-
-    import pytest
 
 
 class FakeManagedTranslator:
@@ -82,3 +81,69 @@ def test_default_output_uses_target_and_injected_provider(
     assert result.exit_code == 0
     assert output.is_file()
     assert str(output) in result.stdout
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["--to", ""],
+        ["--source", ""],
+        ["--to", "english_US"],
+        ["--source", "en_US"],
+        ["--to", "auto"],
+    ],
+)
+def test_invalid_language_is_rejected_before_provider_creation(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    arguments: list[str],
+) -> None:
+    # Given
+    source = tmp_path / "book.epub"
+    write_epub(source, "Hello world.")
+    provider_calls: list[bool] = []
+
+    def forbidden_provider() -> FakeManagedTranslator:
+        provider_calls.append(True)
+        return FakeManagedTranslator()
+
+    monkeypatch.setattr(cli, "create_default_translator", forbidden_provider)
+
+    # When
+    result = CliRunner().invoke(cli.app, [str(source), *arguments])
+
+    # Then
+    assert result.exit_code == 2
+    assert "Invalid value" in result.output
+    assert provider_calls == []
+
+
+@pytest.mark.parametrize(
+    ("source_language", "target_language"),
+    [("auto", "ko"), ("en", "zh-CN")],
+)
+def test_valid_language_tags_reach_provider(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    source_language: str,
+    target_language: str,
+) -> None:
+    # Given
+    source = tmp_path / "book.epub"
+    write_epub(source, "Hello world.")
+    monkeypatch.setattr(cli, "create_default_translator", fake_translator)
+
+    # When
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            str(source),
+            "--source",
+            source_language,
+            "--to",
+            target_language,
+        ],
+    )
+
+    # Then
+    assert result.exit_code == 0

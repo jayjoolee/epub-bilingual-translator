@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import hashlib
 import socket
-import tempfile
 import time
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from pathlib import Path
-from typing import TYPE_CHECKING, Final, Self, final
+from typing import TYPE_CHECKING, Final, Protocol, Self, final
 
 import httpx2
 from pydantic import RootModel, ValidationError
 
+from epub_bilingual_translator.cache import TranslationCache
 from epub_bilingual_translator.models import (
     LanguagePair,
     ProviderResponseError,
@@ -21,6 +21,7 @@ from epub_bilingual_translator.models import (
 
 if TYPE_CHECKING:
     import types
+    from pathlib import Path
 
 type JsonScalar = str | int | float | bool | None
 type JsonValue = JsonScalar | list[JsonValue] | dict[str, JsonValue]
@@ -41,6 +42,7 @@ _TIMEOUT: Final = httpx2.Timeout(
 _SOCKET_OPTIONS: Final[list[tuple[int, int, int]]] = [
     (socket.IPPROTO_TCP, socket.TCP_NODELAY, 1),
 ]
+type Sleeper = Callable[[float], None]
 
 
 class _GooglePayload(RootModel[list[JsonValue]]):
@@ -55,43 +57,21 @@ class GoogleConfig:
     retries: int = 4
 
 
-@final
-class _TranslationCache:
-    def __init__(self, path: Path) -> None:
-        path.mkdir(parents=True, exist_ok=True)
-        self._path: Path = path
+class HttpClient(Protocol):
+    """Narrow synchronous client seam for deterministic provider tests."""
 
-    def get(self, cache_key: str) -> str | None:
-        path = self._path / cache_key
-        try:
-            return path.read_text(encoding="utf-8")
-        except FileNotFoundError:
-            return None
-        except OSError as error:
-            raise ProviderUnavailableError(
-                detail=f"cache read failed: {error}",
-            ) from error
+    def get(
+        self,
+        url: str,
+        *,
+        params: Mapping[str, str],
+    ) -> httpx2.Response:
+        """Return one translation endpoint response."""
+        ...
 
-    def put(self, cache_key: str, translated: str) -> None:
-        destination = self._path / cache_key
-        temporary_path: Path | None = None
-        try:
-            with tempfile.NamedTemporaryFile(
-                mode="w",
-                encoding="utf-8",
-                dir=self._path,
-                delete=False,
-            ) as temporary:
-                _ = temporary.write(translated)
-                temporary_path = Path(temporary.name)
-            _ = temporary_path.replace(destination)
-        except OSError as error:
-            raise ProviderUnavailableError(
-                detail=f"cache write failed: {error}",
-            ) from error
-        finally:
-            if temporary_path is not None:
-                temporary_path.unlink(missing_ok=True)
+    def close(self) -> None:
+        """Release client resources."""
+        ...
 
 
 @final
@@ -100,21 +80,16 @@ class GoogleWebTranslator:
 
     engine_id: str = "google-web-gtx-v1"
 
-    def __init__(self, config: GoogleConfig) -> None:
+    def __init__(
+        self,
+        config: GoogleConfig,
+        client: HttpClient | None = None,
+        sleeper: Sleeper = time.sleep,
+    ) -> None:
         self._config: GoogleConfig = config
-        self._cache: _TranslationCache = _TranslationCache(config.cache_dir)
-        transport = httpx2.HTTPTransport(
-            http2=True,
-            retries=3,
-            limits=_LIMITS,
-            socket_options=_SOCKET_OPTIONS,
-        )
-        self._client: httpx2.Client = httpx2.Client(
-            transport=transport,
-            timeout=_TIMEOUT,
-            follow_redirects=True,
-            headers={"User-Agent": "epub-bilingual-translator/0.1"},
-        )
+        self._cache: TranslationCache = TranslationCache(config.cache_dir)
+        self._sleeper: Sleeper = sleeper
+        self._client: HttpClient = client or _create_http_client()
 
     def translate_html(self, value: str, pair: LanguagePair) -> str:
         """Translate one fragment, reusing only successful cached responses."""
@@ -143,13 +118,16 @@ class GoogleWebTranslator:
                 _ = response.raise_for_status()
                 return parse_google_translation(response.text)
             except httpx2.HTTPStatusError as error:
-                last_detail = str(error)
-                if error.response.status_code not in _TRANSIENT_STATUSES:
+                status_code = error.response.status_code
+                last_detail = f"HTTP {status_code} from translation provider"
+                if status_code not in _TRANSIENT_STATUSES:
                     break
-            except (httpx2.RequestError, ProviderResponseError) as error:
-                last_detail = str(error)
+            except httpx2.RequestError as error:
+                last_detail = f"network request failed ({type(error).__name__})"
+            except ProviderResponseError:
+                last_detail = "translation provider returned an invalid response"
             if attempt < self._config.retries:
-                time.sleep(float(min(1 << attempt, 8)))
+                self._sleeper(float(min(1 << attempt, 8)))
         raise ProviderUnavailableError(detail=last_detail)
 
     def _cache_key(self, value: str, pair: LanguagePair) -> str:
@@ -171,6 +149,21 @@ class GoogleWebTranslator:
     ) -> None:
         del error_type, error, traceback
         self.close()
+
+
+def _create_http_client() -> httpx2.Client:
+    transport = httpx2.HTTPTransport(
+        http2=True,
+        retries=3,
+        limits=_LIMITS,
+        socket_options=_SOCKET_OPTIONS,
+    )
+    return httpx2.Client(
+        transport=transport,
+        timeout=_TIMEOUT,
+        follow_redirects=True,
+        headers={"User-Agent": "epub-bilingual-translator/0.1"},
+    )
 
 
 def parse_google_translation(value: str) -> str:

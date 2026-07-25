@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Final
 
 import typer
 from rich.console import Console
@@ -24,6 +25,7 @@ app = typer.Typer(
     pretty_exceptions_enable=False,
 )
 _error_console = Console(stderr=True)
+_LANGUAGE_TAG: Final = re.compile(r"[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*")
 
 
 def default_output_path(input_path: Path, target: str) -> Path:
@@ -45,16 +47,44 @@ def _show_version(value: bool) -> None:
         raise typer.Exit
 
 
+def _target_language(value: str) -> str:
+    return _parse_language(value, allow_auto=False)
+
+
+def _source_language(value: str) -> str:
+    return _parse_language(value, allow_auto=True)
+
+
+def _parse_language(value: str, *, allow_auto: bool) -> str:
+    normalized = value.strip()
+    if allow_auto and normalized.casefold() == "auto":
+        return "auto"
+    if normalized.casefold() == "auto" or _LANGUAGE_TAG.fullmatch(normalized) is None:
+        detail = "use a language tag such as en, ko, or zh-CN"
+        raise typer.BadParameter(detail)
+    return normalized
+
+
 @app.command()
 def translate_command(
     input_path: Annotated[Path, typer.Argument(help="Source DRM-free .epub file")],
     target: Annotated[
         str,
-        typer.Option("--to", metavar="LANG", help="Target language code"),
+        typer.Option(
+            "--to",
+            metavar="LANG",
+            callback=_target_language,
+            help="Target language code",
+        ),
     ] = "ko",
     source: Annotated[
         str,
-        typer.Option("--source", metavar="LANG", help="Source language code"),
+        typer.Option(
+            "--source",
+            metavar="LANG",
+            callback=_source_language,
+            help="Source language code",
+        ),
     ] = "auto",
     output_path: Annotated[
         Path | None,
