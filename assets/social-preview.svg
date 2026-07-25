@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="title desc">
+  <title id="title">EPUB Bilingual Translator</title>
+  <desc id="desc">An open book showing English and Korean text with a translation arrow.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#071426"/>
+      <stop offset="0.52" stop-color="#102746"/>
+      <stop offset="1" stop-color="#0b5265"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#42d3ff"/>
+      <stop offset="1" stop-color="#62f1c7"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="22" stdDeviation="24" flood-color="#020814" flood-opacity=".5"/>
+    </filter>
+  </defs>
+
+  <rect width="1280" height="640" rx="40" fill="url(#background)"/>
+  <circle cx="1115" cy="102" r="220" fill="#36d8ca" opacity=".08"/>
+  <circle cx="90" cy="585" r="245" fill="#4ab8ff" opacity=".07"/>
+  <path d="M0 505 C260 440 370 600 650 518 S1040 430 1280 510 V640 H0Z" fill="#05101f" opacity=".52"/>
+
+  <g transform="translate(90 104)" filter="url(#shadow)">
+    <path d="M0 34 Q142 0 262 72 V388 Q142 322 0 350Z" fill="#f8fbff"/>
+    <path d="M524 34 Q382 0 262 72 V388 Q382 322 524 350Z" fill="#eef8fb"/>
+    <path d="M262 72 V388" stroke="#c2dbe2" stroke-width="5"/>
+
+    <rect x="52" y="102" width="142" height="15" rx="7.5" fill="#18395a"/>
+    <rect x="52" y="140" width="164" height="10" rx="5" fill="#9ab4c6"/>
+    <rect x="52" y="166" width="140" height="10" rx="5" fill="#b2c6d3"/>
+    <rect x="52" y="192" width="174" height="10" rx="5" fill="#9ab4c6"/>
+    <rect x="52" y="218" width="128" height="10" rx="5" fill="#b2c6d3"/>
+    <rect x="52" y="262" width="158" height="10" rx="5" fill="#9ab4c6"/>
+    <rect x="52" y="288" width="112" height="10" rx="5" fill="#b2c6d3"/>
+
+    <text x="322" y="126" fill="#123a58" font-family="-apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', sans-serif" font-size="35" font-weight="750">한국어 번역</text>
+    <rect x="322" y="156" width="146" height="10" rx="5" fill="#7fa7b6"/>
+    <rect x="322" y="182" width="170" height="10" rx="5" fill="#aac2cb"/>
+    <rect x="322" y="208" width="124" height="10" rx="5" fill="#7fa7b6"/>
+    <rect x="322" y="234" width="158" height="10" rx="5" fill="#aac2cb"/>
+    <rect x="322" y="278" width="172" height="10" rx="5" fill="#7fa7b6"/>
+    <rect x="322" y="304" width="118" height="10" rx="5" fill="#aac2cb"/>
+
+    <circle cx="262" cy="208" r="44" fill="url(#accent)"/>
+    <path d="M241 208 H278 M265 194 L280 208 L265 222" fill="none" stroke="#092039" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <g transform="translate(700 155)">
+    <text x="0" y="0" fill="#8cecff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="24" font-weight="700" letter-spacing="4">OPEN SOURCE · CLI + CODEX SKILL</text>
+    <text x="0" y="82" fill="#ffffff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="66" font-weight="800">EPUB Bilingual</text>
+    <text x="0" y="150" fill="#ffffff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="66" font-weight="800">Translator</text>
+    <rect x="0" y="188" width="430" height="4" rx="2" fill="url(#accent)"/>
+    <text x="0" y="242" fill="#d9edf5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="27">Long paragraphs. Links. Formatting.</text>
+    <text x="0" y="282" fill="#d9edf5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="27">Translation first, original preserved.</text>
+    <g transform="translate(0 330)">
+      <rect width="420" height="56" rx="14" fill="#06111f" stroke="#42d3ff" stroke-opacity=".36"/>
+      <text x="24" y="37" fill="#78f1d0" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="22">$ epub-translate book.epub --to ko</text>
+    </g>
+  </g>
+</svg>
