@@ -1,0 +1,108 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "epub-bilingual-translator"
+version = "0.1.0"
+description = "Create translation-first bilingual EPUB books."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+authors = [{ name = "Joowon Lee" }]
+keywords = ["epub", "ebook", "translation", "bilingual", "korean"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Text Processing :: Linguistic",
+    "Topic :: Utilities",
+]
+dependencies = [
+    "httpx2[http2,brotli,zstd]>=2.7,<3",
+    "defusedxml>=0.7,<1",
+    "pydantic>=2.12,<3",
+    "rich>=13.9,<15",
+    "typer>=0.21,<1",
+]
+
+[project.urls]
+Homepage = "https://github.com/jayjoolee/epub-bilingual-translator"
+Repository = "https://github.com/jayjoolee/epub-bilingual-translator"
+Issues = "https://github.com/jayjoolee/epub-bilingual-translator/issues"
+
+[project.scripts]
+epub-translate = "epub_bilingual_translator.cli:main"
+
+[dependency-groups]
+dev = [
+    "basedpyright>=1.31",
+    "pytest>=8.3,<10",
+    "ruff>=0.12",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/epub_bilingual_translator"]
+
+[tool.basedpyright]
+typeCheckingMode = "all"
+pythonVersion = "3.12"
+pythonPlatform = "All"
+include = ["src", "tests"]
+exclude = ["**/__pycache__", "**/.venv", "**/build", "**/dist"]
+reportUnusedCallResult = "warning"
+reportUnnecessaryTypeIgnoreComment = "error"
+reportUnusedVariable = "error"
+reportMissingParameterType = "error"
+reportPrivateUsage = "error"
+reportUnnecessaryComparison = false
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    "COM812",
+    "CPY001",
+    "D203",
+    "D213",
+    "FBT001",
+    "FBT002",
+    "FIX002",
+    "ISC001",
+    "TD002",
+    "TD003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"src/epub_bilingual_translator/cli.py" = ["PLR0913", "PLR0917"]
+"src/epub_bilingual_translator/google.py" = ["D105", "D107"]
+"src/epub_bilingual_translator/html.py" = ["C901", "D105"]
+"src/epub_bilingual_translator/models.py" = ["D105", "TC003"]
+"tests/**/*.py" = ["ARG", "D", "PLR2004", "S101", "S314", "SLF001"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["typer.Argument", "typer.Option"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true
+docstring-code-line-length = "dynamic"
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = ["-ra", "--strict-config", "--strict-markers"]
+filterwarnings = ["error"]
