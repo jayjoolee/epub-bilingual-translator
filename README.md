@@ -69,10 +69,11 @@ marked `translate="no"` or `notranslate`.
 Before translation, the CLI validates the EPUB mimetype and container, refuses encrypted ZIP
 members, unsafe paths, duplicates, and suspicious compression ratios, and bounds archive work
 to 10,000 members, 512 MiB per member, 2 GiB total uncompressed data, and 16 MiB per XHTML
-document. Fully serialized provider request URLs are capped at 32 KiB and responses are
-streamed under a 1 MiB ceiling. The private local cache rejects symbolic links in its path and
-anchors file operations to a verified user-owned directory. Output publication is atomic and
-will not replace a file that appears during a run.
+document. Translated fragments share a cumulative 16 MiB UTF-8 budget, and final XHTML
+serialization cannot exceed that same limit. Fully serialized provider request URLs are capped
+at 32 KiB and responses are streamed under a 1 MiB ceiling. The private local cache rejects
+symbolic links in its path and anchors file operations to a verified user-owned directory.
+Output publication is atomic and will not replace a file that appears during a run.
 
 ## Real-world verification
 
@@ -100,7 +101,7 @@ epub-translate "book.epub" --to ja --output "book.ja.bilingual.epub"
 The repository includes an optional Codex skill. Install it with Codex's bundled skill installer:
 
 ```bash
-python ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py \
+uv run --no-project ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py \
   --repo jayjoolee/epub-bilingual-translator \
   --path skill/translate-epub
 ```

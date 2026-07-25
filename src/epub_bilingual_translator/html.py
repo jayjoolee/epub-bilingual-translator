@@ -9,6 +9,8 @@ from enum import StrEnum
 from html.parser import HTMLParser
 from typing import assert_never, override
 
+from epub_bilingual_translator.xhtml import utf8_byte_length_bounded
+
 
 class TokenKind(StrEnum):
     """Kinds emitted by the standard-library HTML tokenizer."""
@@ -38,6 +40,17 @@ class HtmlChunkError(ValueError):
     @override
     def __str__(self) -> str:
         return f"max_chars must be positive, got {self.max_chars}"
+
+
+@dataclass(frozen=True, slots=True)
+class HtmlChunkByteLimitError(ValueError):
+    """Balanced fragments would exceed their cumulative byte limit."""
+
+    max_bytes: int
+
+    @override
+    def __str__(self) -> str:
+        return f"balanced HTML fragments exceed {self.max_bytes} bytes"
 
 
 class _Tokenizer(HTMLParser):
@@ -108,28 +121,50 @@ def visible_text(value: str) -> str:
     return "".join(reader.parts)
 
 
-def split_balanced_html(value: str, max_chars: int) -> list[str]:
+def split_balanced_html(
+    value: str,
+    max_chars: int,
+    max_bytes: int | None = None,
+) -> list[str]:
     """Split markup near text boundaries and balance active tags per fragment."""
     if max_chars < 1:
         raise HtmlChunkError(max_chars=max_chars)
+    if max_bytes is not None and max_bytes < 1:
+        raise HtmlChunkByteLimitError(max_bytes=max_bytes)
     tokenizer = _Tokenizer()
     tokenizer.feed(value)
     tokenizer.close()
-    return _build_chunks(tokenizer.tokens, max_chars)
+    return _build_chunks(tokenizer.tokens, max_chars, max_bytes)
 
 
-def _build_chunks(tokens: list[HtmlToken], max_chars: int) -> list[str]:
+def _build_chunks(
+    tokens: list[HtmlToken],
+    max_chars: int,
+    max_bytes: int | None,
+) -> list[str]:
     chunks: list[str] = []
     current: list[str] = []
     active: list[HtmlToken] = []
     current_length = 0
+    total_bytes = 0
 
     def flush() -> None:
-        nonlocal current, current_length
+        nonlocal current, current_length, total_bytes
         if current_length == 0:
             return
         closers = [f"</{token.tag}>" for token in reversed(active)]
-        chunks.append("".join([*current, *closers]))
+        parts = [*current, *closers]
+        if max_bytes is not None:
+            fragment_bytes = 0
+            for part in parts:
+                fragment_bytes += utf8_byte_length_bounded(
+                    part,
+                    max_bytes - total_bytes - fragment_bytes,
+                )
+                if total_bytes + fragment_bytes > max_bytes:
+                    raise HtmlChunkByteLimitError(max_bytes=max_bytes)
+            total_bytes += fragment_bytes
+        chunks.append("".join(parts))
         current = [token.raw for token in active]
         current_length = 0
 

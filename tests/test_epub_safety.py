@@ -28,6 +28,23 @@ class DestinationRaceTranslator:
         return value
 
 
+class AmplifyingTranslator:
+    engine_id: str = "amplifying-test"
+
+    def __init__(self, fragment: str) -> None:
+        self.fragment: str = fragment
+        self.calls: int = 0
+
+    def translate_html(
+        self,
+        value: str,
+        pair: models.LanguagePair,
+    ) -> str:
+        del value, pair
+        self.calls += 1
+        return self.fragment
+
+
 @pytest.mark.parametrize(
     "opt_out",
     ['translate="no"', 'class="body notranslate extra"'],
@@ -120,6 +137,123 @@ def test_destination_created_during_translation_is_not_overwritten(
 
     # Then
     assert output.read_bytes() == b"sentinel"
+    assert list(tmp_path.glob(".*.epub.tmp")) == []
+
+
+def test_cumulative_translated_output_is_refused_before_document_growth(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Given
+    source = tmp_path / "source.epub"
+    output = tmp_path / "translated.epub"
+    limit = 4_000
+    blocks = "".join("<p>small source block.</p>" for _ in range(10))
+    chapter = f"""<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="{XHTML}"><body>{blocks}</body></html>""".encode()
+    write_epub_with_chapter(source, chapter)
+    translator = AmplifyingTranslator("x" * 900)
+    monkeypatch.setattr(epub, "MAX_XHTML_BYTES", limit)
+
+    # When
+    with pytest.raises(models.ArchiveError, match="translated XHTML exceeds limit"):
+        _ = epub.translate_epub(options(source, output), translator)
+
+    # Then
+    assert translator.calls == 5
+    assert not output.exists()
+    assert list(tmp_path.glob(".*.epub.tmp")) == []
+
+
+def test_final_xhtml_serialization_is_bounded_after_translations_fit(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Given
+    source = tmp_path / "source.epub"
+    output = tmp_path / "translated.epub"
+    limit = 4_000
+    blocks = "".join("<p>small source block.</p>" for _ in range(10))
+    chapter = f"""<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="{XHTML}"><body>{blocks}</body></html>""".encode()
+    write_epub_with_chapter(source, chapter)
+    translator = AmplifyingTranslator("x" * 350)
+    monkeypatch.setattr(epub, "MAX_XHTML_BYTES", limit)
+
+    # When
+    with pytest.raises(models.ArchiveError, match="translated XHTML exceeds limit"):
+        _ = epub.translate_epub(options(source, output), translator)
+
+    # Then
+    assert translator.calls == 10
+    assert translator.calls * len(translator.fragment.encode()) < limit
+    assert not output.exists()
+    assert list(tmp_path.glob(".*.epub.tmp")) == []
+
+
+def test_malformed_provider_unicode_is_refused_without_output(
+    tmp_path: pathlib.Path,
+) -> None:
+    # Given
+    source = tmp_path / "source.epub"
+    output = tmp_path / "translated.epub"
+    write_epub(source, "small source block.")
+    translator = AmplifyingTranslator("\ud800")
+
+    # When
+    with pytest.raises(
+        models.ArchiveError,
+        match="translated XHTML contains invalid Unicode",
+    ):
+        _ = epub.translate_epub(options(source, output), translator)
+
+    # Then
+    assert translator.calls == 1
+    assert not output.exists()
+    assert list(tmp_path.glob(".*.epub.tmp")) == []
+
+
+def test_repeated_large_opening_tag_is_refused_before_provider_use(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Given
+    source = tmp_path / "source.epub"
+    output = tmp_path / "translated.epub"
+    tag_padding = "x" * 1_000
+    paragraph = f'<span data-padding="{tag_padding}">{"word " * 200}</span>'
+    write_epub(source, paragraph)
+    translator = RecordingTranslator(max_chars=200)
+    monkeypatch.setattr(epub, "MAX_XHTML_BYTES", 4_000)
+
+    # When
+    with pytest.raises(models.ArchiveError, match="XHTML fragments exceed limit"):
+        _ = epub.translate_epub(options(source, output, max_chars=200), translator)
+
+    # Then
+    assert translator.requests == []
+    assert not output.exists()
+    assert list(tmp_path.glob(".*.epub.tmp")) == []
+
+
+def test_bare_ampersand_repair_expansion_is_refused_before_allocation(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Given
+    source = tmp_path / "source.epub"
+    output = tmp_path / "translated.epub"
+    write_epub(source, "small source block.")
+    translator = AmplifyingTranslator("&" * 1_000)
+    monkeypatch.setattr(epub, "MAX_XHTML_BYTES", 4_000)
+
+    # When
+    with pytest.raises(models.ArchiveError, match="translated XHTML exceeds limit"):
+        _ = epub.translate_epub(options(source, output), translator)
+
+    # Then
+    assert translator.calls == 1
+    assert not output.exists()
     assert list(tmp_path.glob(".*.epub.tmp")) == []
 
 

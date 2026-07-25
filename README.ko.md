@@ -63,10 +63,11 @@ epub-translate "책.epub" --to ko
 번역 전에 EPUB mimetype과 container를 검사하고, 암호화된 ZIP 멤버, 위험한 경로,
 중복 파일, 비정상적인 압축률을 거부합니다. 한 번에 처리하는 범위는 멤버 10,000개,
 멤버당 512 MiB, 전체 압축 해제 크기 2 GiB, XHTML 문서당 16 MiB로 제한합니다.
-고정 파라미터와 퍼센트 인코딩을 포함한 공급자 요청 URL 전체는 32 KiB, 응답
-스트림은 1 MiB로 제한합니다. 비공개 로컬 캐시는 경로에 있는 심볼릭 링크를
-거부하고, 사용자 소유로 확인한 디렉터리에 파일 작업을 고정합니다. 결과는
-원자적으로 생성하며, 실행 중 같은 경로에 생긴 파일도 덮어쓰지 않습니다.
+번역된 조각의 UTF-8 누적 크기도 16 MiB로 제한하고, 최종 XHTML 직렬화도 같은
+한도를 넘을 수 없습니다. 고정 파라미터와 퍼센트 인코딩을 포함한 공급자 요청 URL
+전체는 32 KiB, 응답 스트림은 1 MiB로 제한합니다. 비공개 로컬 캐시는 경로에 있는
+심볼릭 링크를 거부하고, 사용자 소유로 확인한 디렉터리에 파일 작업을 고정합니다.
+결과는 원자적으로 생성하며, 실행 중 같은 경로에 생긴 파일도 덮어쓰지 않습니다.
 
 ## 실제 장편 검증
 
@@ -94,7 +95,7 @@ epub-translate "책.epub" --to ja --output "책.ja.bilingual.epub"
 선택적으로 Codex 스킬을 설치할 수 있습니다.
 
 ```bash
-python ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py \
+uv run --no-project ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py \
   --repo jayjoolee/epub-bilingual-translator \
   --path skill/translate-epub
 ```

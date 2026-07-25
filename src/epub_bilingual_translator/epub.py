@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import copy
-import re
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Final
 from urllib.parse import unquote, urlsplit
 from xml.etree import ElementTree as ET
-from xml.sax.saxutils import escape
 
 from defusedxml import ElementTree as DefusedET
 from defusedxml.common import DefusedXmlException
@@ -27,7 +25,12 @@ from epub_bilingual_translator.archive import (
     verify_output,
     write_transformed_member,
 )
-from epub_bilingual_translator.html import split_balanced_html, visible_text
+from epub_bilingual_translator.html import (
+    HtmlChunkByteLimitError,
+    split_balanced_html,
+    visible_text,
+)
+from epub_bilingual_translator.markup import repair_inner_markup
 from epub_bilingual_translator.models import (
     ArchiveError,
     DrmProtectedError,
@@ -37,6 +40,11 @@ from epub_bilingual_translator.models import (
     OutputPathError,
     TranslationResult,
     Translator,
+)
+from epub_bilingual_translator.xhtml import (
+    inner_markup,
+    serialize_document_bounded,
+    utf8_byte_length_bounded,
 )
 
 _BLOCK_TAGS: Final = frozenset(
@@ -54,9 +62,6 @@ _CIPHER_DATA: Final = "{http://www.w3.org/2001/04/xmlenc#}CipherData"
 _CIPHER_REFERENCE: Final = "{http://www.w3.org/2001/04/xmlenc#}CipherReference"
 _FONT_OBFUSCATION: Final = "http://www.idpf.org/2008/embedding"
 _FONT_SUFFIXES: Final = frozenset({".otf", ".ttf", ".woff", ".woff2"})
-_BARE_AMPERSAND: Final = re.compile(
-    r"&(?!amp;|lt;|gt;|quot;|apos;|#\d+;|#[xX][0-9A-Fa-f]+;)",
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,6 +109,8 @@ def translate_epub(
         raise ArchiveError(detail="unsafe XML content") from error
     except ET.ParseError as error:
         raise ArchiveError(detail="malformed XML content") from error
+    except HtmlChunkByteLimitError:
+        raise ArchiveError(detail="XHTML fragments exceed limit") from None
     except zipfile.BadZipFile as error:
         raise ArchiveError(detail="corrupt ZIP archive") from error
     except OSError as error:
@@ -118,21 +125,31 @@ def _translate_document(data: bytes, context: _TransformContext) -> _DocumentRes
     root = DefusedET.fromstring(data)
     blocks = 0
     chunks = 0
+    translated_bytes = 0
     for parent in root.iter():
         for original in list(parent):
             if _local_name(original) not in _BLOCK_TAGS or _should_skip(original):
                 continue
-            markup = _inner_markup(original)
+            markup = inner_markup(original)
             if not visible_text(markup).strip():
                 continue
-            pieces = split_balanced_html(markup, context.max_chars)
-            translated = "".join(
-                context.translator.translate_html(piece, context.pair)
-                for piece in pieces
-            )
+            pieces = split_balanced_html(markup, context.max_chars, MAX_XHTML_BYTES)
+            translated_pieces: list[str] = []
+            for piece in pieces:
+                translated_piece = context.translator.translate_html(
+                    piece, context.pair
+                )
+                translated_bytes += utf8_byte_length_bounded(
+                    translated_piece,
+                    MAX_XHTML_BYTES - translated_bytes,
+                )
+                if translated_bytes > MAX_XHTML_BYTES:
+                    raise ArchiveError(detail="translated XHTML exceeds limit")
+                translated_pieces.append(translated_piece)
+            translated = "".join(translated_pieces)
             translated_element = copy.deepcopy(original)
             translated_element.tail = None
-            _set_inner_markup(translated_element, translated)
+            repair_inner_markup(translated_element, translated, MAX_XHTML_BYTES)
             translated_element.set("lang", context.pair.target)
             translated_element.set("data-epub-translation", "translation")
             original.set("data-epub-translation", "original")
@@ -140,35 +157,10 @@ def _translate_document(data: bytes, context: _TransformContext) -> _DocumentRes
             blocks += 1
             chunks += len(pieces)
     return _DocumentResult(
-        ET.tostring(root, encoding="unicode", xml_declaration=True).encode(),
+        serialize_document_bounded(root, MAX_XHTML_BYTES),
         blocks,
         chunks,
     )
-
-
-def _inner_markup(element: ET.Element) -> str:
-    parts = [escape(element.text or "")]
-    parts.extend(
-        ET.tostring(child, encoding="unicode", short_empty_elements=True)
-        for child in element
-    )
-    return "".join(parts)
-
-
-def _set_inner_markup(element: ET.Element, markup: str) -> None:
-    for child in list(element):
-        element.remove(child)
-    repaired = _BARE_AMPERSAND.sub("&amp;", markup)
-    repaired = "".join(
-        split_balanced_html(repaired, max(1, len(visible_text(repaired)))),
-    )
-    wrapper = DefusedET.fromstring(
-        f'<wrapper xmlns="http://www.w3.org/1999/xhtml">{repaired}</wrapper>',
-    )
-    element.text = wrapper.text
-    for child in list(wrapper):
-        wrapper.remove(child)
-        element.append(child)
 
 
 def _should_skip(element: ET.Element) -> bool:
