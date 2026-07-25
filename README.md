@@ -70,10 +70,11 @@ Before translation, the CLI validates the EPUB mimetype and container, refuses e
 members, unsafe paths, duplicates, and suspicious compression ratios, and bounds archive work
 to 10,000 members, 512 MiB per member, 2 GiB total uncompressed data, and 16 MiB per XHTML
 document. Translated fragments share a cumulative 16 MiB UTF-8 budget, and final XHTML
-serialization cannot exceed that same limit. Fully serialized provider request URLs are capped
-at 32 KiB and responses are streamed under a 1 MiB ceiling. The private local cache rejects
-symbolic links in its path and anchors file operations to a verified user-owned directory.
-Output publication is atomic and will not replace a file that appears during a run.
+serialization cannot exceed that same limit. XHTML parsing stops at 256 nested elements or
+100,000 total elements before retaining the remaining tree. Fully serialized provider request
+URLs are capped at 32 KiB and responses are streamed under a 1 MiB ceiling. The private local
+cache rejects symbolic links in its path and anchors file operations to a verified user-owned
+directory. Output publication is atomic and will not replace a file that appears during a run.
 
 ## Real-world verification
 

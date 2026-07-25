@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import io
 import os
 import zipfile
-from typing import TYPE_CHECKING, Never, Self
+from typing import TYPE_CHECKING, Never, Self, override
 from xml.etree import ElementTree as ET
 
 import pytest
@@ -69,6 +70,24 @@ class AmplifyingTranslator:
         del value, pair
         self.calls += 1
         return self.fragment
+
+
+class PrefixCountingReader(io.BytesIO):
+    def __init__(self, value: bytes, maximum_chunk_size: int = 32) -> None:
+        super().__init__(value)
+        self.bytes_read: int = 0
+        self.maximum_chunk_size: int = maximum_chunk_size
+
+    @override
+    def read(self, size: int | None = -1, /) -> bytes:
+        chunk_size = (
+            self.maximum_chunk_size
+            if size is None or size < 0
+            else min(size, self.maximum_chunk_size)
+        )
+        result = super().read(chunk_size)
+        self.bytes_read += len(result)
+        return result
 
 
 @pytest.mark.parametrize(
@@ -393,6 +412,59 @@ def test_deep_xhtml_nesting_is_refused_before_provider_use(
 
     # When
     with pytest.raises(models.ArchiveError, match="XHTML nesting exceeds limit"):
+        _ = epub.translate_epub(options(source, output), translator)
+
+    # Then
+    assert translator.requests == []
+    assert not output.exists()
+    assert list(tmp_path.glob(".*.epub.tmp")) == []
+
+
+def test_xhtml_parser_refuses_excessive_nesting_before_consuming_full_source() -> None:
+    # Given
+    nesting = epub.MAX_XHTML_NESTING + 1
+    source = PrefixCountingReader(
+        b"<root>" + b"<node>" * nesting + b"x" * 1_000_000,
+    )
+
+    # When
+    with pytest.raises(models.ArchiveError, match="XHTML nesting exceeds limit"):
+        _ = epub.parse_xhtml_bounded(source)
+
+    # Then
+    assert source.bytes_read < 10_000
+
+
+def test_xhtml_parser_accepts_document_at_exact_nesting_limit() -> None:
+    # Given
+    nesting = epub.MAX_XHTML_NESTING - 1
+    source = io.BytesIO(
+        b"<root>" + b"<node>" * nesting + b"</node>" * nesting + b"</root>",
+    )
+
+    # When
+    root = epub.parse_xhtml_bounded(source)
+
+    # Then
+    assert root.tag == "root"
+
+
+def test_wide_xhtml_is_refused_before_provider_or_output(
+    tmp_path: pathlib.Path,
+) -> None:
+    # Given
+    source = tmp_path / "wide.xhtml.epub"
+    output = tmp_path / "translated.epub"
+    prefix = f'<?xml version="1.0" encoding="utf-8"?><html xmlns="{XHTML}"><body><p>'
+    spans = "".join(
+        f'<span data-index="{index}" />' for index in range(epub.MAX_XHTML_ELEMENTS)
+    )
+    chapter = (prefix + spans + "</p></body></html>").encode()
+    write_epub_with_chapter(source, chapter)
+    translator = RecordingTranslator(max_chars=2_800)
+
+    # When
+    with pytest.raises(models.ArchiveError, match="XHTML element count exceeds limit"):
         _ = epub.translate_epub(options(source, output), translator)
 
     # Then
