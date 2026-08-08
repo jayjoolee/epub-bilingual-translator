@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling>=1.27"]
+requires = ["hatchling>=1.31.0"]
 build-backend = "hatchling.build"
 
 [project]
@@ -25,11 +25,11 @@ classifiers = [
     "Topic :: Utilities",
 ]
 dependencies = [
-    "httpx2[http2,brotli,zstd]>=2.7,<3",
+    "httpx2[http2,brotli,zstd]>=2.9.1,<3",
     "defusedxml>=0.7,<1",
     "pydantic>=2.12,<3",
-    "rich>=13.9,<15",
-    "typer>=0.21,<1",
+    "rich>=15.0.0,<16",
+    "typer>=0.27.1,<1",
 ]
 
 [project.urls]
@@ -44,7 +44,7 @@ epub-translate = "epub_bilingual_translator.cli:main"
 dev = [
     "basedpyright>=1.31",
     "pytest>=8.3,<10",
-    "ruff>=0.12",
+    "ruff>=0.16.1",
 ]
 
 [tool.hatch.build.targets.wheel]
